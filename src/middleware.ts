@@ -28,6 +28,9 @@ export default auth((request) => {
 });
 
 export const config = {
+  // Node.js runtime: the edge runtime is deprecated, and the auth check here
+  // needs nothing edge-specific.
+  runtime: "nodejs",
   matcher: [
     /*
      * Everything except Next internals, static assets and the API surface,

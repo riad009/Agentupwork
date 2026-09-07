@@ -4,7 +4,10 @@ import { requireApiUser } from "@/lib/session";
 import { rebuildDemo } from "@/features/proposals/regenerate";
 
 export const runtime = "nodejs";
-export const maxDuration = 800;
+// Capped to the serverless limit. A full rebuild (generate, build, deploy,
+// screenshot) routinely exceeds this, so on serverless hosting it must run on
+// the background worker rather than inline in the request.
+export const maxDuration = 60;
 
 type Context = { params: Promise<{ id: string }> };
 

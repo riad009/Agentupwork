@@ -5,7 +5,9 @@ import { requireApiUser } from "@/lib/session";
 import { regenerateBrief, regenerateProposal } from "@/features/proposals/regenerate";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// Capped to the serverless limit. Proposal rewriting is one Claude call;
+// brief regeneration also renders a PDF, so it is the slower of the two.
+export const maxDuration = 60;
 
 type Context = { params: Promise<{ id: string }> };
 

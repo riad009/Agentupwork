@@ -10,6 +10,7 @@ const eslintConfig = [
       "build/**",
       "next-env.d.ts",
       "demo-workspace/**",
+      ".vercel/**",
       "storage/**",
     ],
   },

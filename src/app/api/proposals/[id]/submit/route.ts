@@ -6,7 +6,8 @@ import { getConnectsPreview, submitProposal } from "@/features/proposals/submit"
 import { ValidationError } from "@/lib/errors";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// Serverless platforms cap function duration; submission is a single API call.
+export const maxDuration = 60;
 
 type Context = { params: Promise<{ id: string }> };
 
