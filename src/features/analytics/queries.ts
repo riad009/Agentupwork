@@ -62,10 +62,10 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
   // Interviews and hires are recorded from Upwork submission responses when the
   // API reports them; until then they stay at zero rather than being guessed.
   const interviews = await prisma.submission.count({
-    where: { userId, status: "SUCCESS", upworkResponse: { path: ["interviewing"], equals: true } },
+    where: { userId, status: "SUCCESS", interviewing: true },
   });
   const hires = await prisma.submission.count({
-    where: { userId, status: "SUCCESS", upworkResponse: { path: ["hired"], equals: true } },
+    where: { userId, status: "SUCCESS", hired: true },
   });
 
   return {

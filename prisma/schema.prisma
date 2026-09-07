@@ -1,12 +1,19 @@
 // Upwork AI Job Hunter — data model
-// PostgreSQL + Prisma. Every domain row is scoped to a User so tenants stay isolated.
+// MongoDB + Prisma. Every domain document is scoped to a User so tenants stay isolated.
+//
+// MongoDB notes: ids are ObjectIds mapped to _id, monetary values are Float
+// (the MongoDB connector has no Float type), and schema changes are applied
+// with `prisma db push` rather than migrations.
 
 generator client {
   provider = "prisma-client-js"
+  // "native" covers local development; the RHEL target is what serverless
+  // platforms (Vercel, AWS Lambda) actually run on.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -157,7 +164,7 @@ enum IntegrationProvider {
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String    @id @default(cuid())
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
   email         String    @unique
   name          String?
   image         String?
@@ -194,17 +201,17 @@ model User {
 }
 
 model Account {
-  id                String  @id @default(cuid())
-  userId            String
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -214,9 +221,9 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(cuid())
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
   sessionToken String   @unique
-  userId       String
+  userId       String   @db.ObjectId
   expires      DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -225,6 +232,7 @@ model Session {
 }
 
 model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
   identifier String
   token      String   @unique
   expires    DateTime
@@ -233,8 +241,8 @@ model VerificationToken {
 }
 
 model PasswordResetToken {
-  id        String    @id @default(cuid())
-  userId    String
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String    @db.ObjectId
   tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
@@ -253,12 +261,12 @@ model PasswordResetToken {
 /// OAuth2 connection to the official Upwork API. Tokens are AES-256-GCM
 /// encrypted at rest and never leave the server.
 model UpworkConnection {
-  id                     String    @id @default(cuid())
-  userId                 String    @unique
+  id                     String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId                 String    @unique @db.ObjectId
   upworkUserId           String?
   upworkOrgId            String?
-  accessTokenCiphertext  String    @db.Text
-  refreshTokenCiphertext String?   @db.Text
+  accessTokenCiphertext  String
+  refreshTokenCiphertext String?
   scope                  String?
   tokenType              String    @default("Bearer")
   expiresAt              DateTime?
@@ -284,11 +292,11 @@ model UpworkConnection {
 /// Per-user credentials for replaceable providers (Claude, GitHub, Vercel, SMTP).
 /// `secretCiphertext` is encrypted; only the server ever decrypts it.
 model IntegrationCredential {
-  id               String              @id @default(cuid())
-  userId           String
+  id               String              @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String              @db.ObjectId
   provider         IntegrationProvider
   label            String?
-  secretCiphertext String              @db.Text
+  secretCiphertext String
   metadata         Json?
   lastVerifiedAt   DateTime?
   isActive         Boolean             @default(true)
@@ -306,8 +314,8 @@ model IntegrationCredential {
 // ---------------------------------------------------------------------------
 
 model UserPreference {
-  id     String @id @default(cuid())
-  userId String @unique
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @unique @db.ObjectId
 
   // automation
   automationEnabled Boolean           @default(false)
@@ -359,12 +367,12 @@ model UserPreference {
 
 /// Freelancer context injected into every Claude prompt.
 model AiProfile {
-  id                    String   @id @default(cuid())
-  userId                String   @unique
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId                String   @unique @db.ObjectId
   professionalTitle     String?
   yearsOfExperience     Int?
-  hourlyRate            Decimal? @db.Decimal(10, 2)
-  minimumBudget         Decimal? @db.Decimal(12, 2)
+  hourlyRate            Float?
+  minimumBudget         Float?
   preferredProjectSize  String?
   preferredTechnologies String[] @default([])
   industries            String[] @default([])
@@ -372,7 +380,7 @@ model AiProfile {
   preferredTone         String?
   proposalLength        String   @default("SHORT")
   countriesToAvoid      String[] @default([])
-  bio                   String?  @db.Text
+  bio                   String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -380,8 +388,8 @@ model AiProfile {
 }
 
 model JobSearchProfile {
-  id       String  @id @default(cuid())
-  userId   String
+  id       String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId   String  @db.ObjectId
   name     String
   isActive Boolean @default(true)
 
@@ -391,14 +399,14 @@ model JobSearchProfile {
   skills          String[] @default([])
   categoryIds     String[] @default([])
 
-  minFixedBudget      Decimal?          @db.Decimal(12, 2)
-  minHourlyRate       Decimal?          @db.Decimal(10, 2)
-  maxHourlyRate       Decimal?          @db.Decimal(10, 2)
+  minFixedBudget      Float?
+  minHourlyRate       Float?
+  maxHourlyRate       Float?
   maxJobAgeHours      Int?              @default(72)
   minClientHireRate   Int?
-  minClientSpend      Decimal?          @db.Decimal(14, 2)
+  minClientSpend      Float?
   paymentVerifiedOnly Boolean           @default(true)
-  minClientRating     Decimal?          @db.Decimal(3, 2)
+  minClientRating     Float?
   maxProposals        Int?
   countries           String[]          @default([])
   excludedCountries   String[]          @default([])
@@ -422,13 +430,13 @@ model JobSearchProfile {
 // ---------------------------------------------------------------------------
 
 model Job {
-  id              String  @id @default(cuid())
-  userId          String
-  searchProfileId String?
+  id              String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String  @db.ObjectId
+  searchProfileId String? @db.ObjectId
 
   upworkJobId String
   title       String
-  description String   @db.Text
+  description String
   url         String
   category    String?
   subcategory String?
@@ -436,9 +444,9 @@ model Job {
 
   projectType       ProjectType     @default(UNKNOWN)
   experienceLevel   ExperienceLevel @default(ANY)
-  budgetAmount      Decimal?        @db.Decimal(12, 2)
-  hourlyMin         Decimal?        @db.Decimal(10, 2)
-  hourlyMax         Decimal?        @db.Decimal(10, 2)
+  budgetAmount      Float?
+  hourlyMin         Float?
+  hourlyMax         Float?
   currency          String          @default("USD")
   estimatedDuration String?
   workload          String?
@@ -446,9 +454,9 @@ model Job {
 
   clientCountry         String?
   clientCity            String?
-  clientRating          Decimal?  @db.Decimal(3, 2)
+  clientRating          Float?
   clientHireRate        Int?
-  clientTotalSpent      Decimal?  @db.Decimal(14, 2)
+  clientTotalSpent      Float?
   clientJobsPosted      Int?
   clientTotalHires      Int?
   clientOpenJobs        Int?
@@ -486,9 +494,9 @@ model Job {
 }
 
 model JobAnalysis {
-  id     String @id @default(cuid())
-  jobId  String @unique
-  userId String
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  jobId  String @unique @db.ObjectId
+  userId String @db.ObjectId
 
   overallScore       Int
   skillMatch         Int
@@ -500,13 +508,13 @@ model JobAnalysis {
   rankedScore        Float @default(0)
 
   recommendedAction    RecommendedAction
-  reasoningSummary     String            @db.Text
+  reasoningSummary     String
   strengths            String[]          @default([])
   risks                String[]          @default([])
-  technicalOpportunity String?           @db.Text
+  technicalOpportunity String?
 
   demoRecommended  Boolean        @default(false)
-  demoReason       String?        @db.Text
+  demoReason       String?
   demoComplexity   DemoComplexity @default(NONE)
   estimatedFiles   Int?
   demoRequirements String[]       @default([])
@@ -533,16 +541,16 @@ model JobAnalysis {
 // ---------------------------------------------------------------------------
 
 model Proposal {
-  id     String @id @default(cuid())
-  userId String
-  jobId  String
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @db.ObjectId
+  jobId  String @db.ObjectId
 
   status           ProposalStatus @default(GENERATED)
-  content          String         @db.Text
-  editedContent    String?        @db.Text
+  content          String
+  editedContent    String?
   questions        String[]       @default([])
-  bidAmount        Decimal?       @db.Decimal(12, 2)
-  bidHourlyRate    Decimal?       @db.Decimal(10, 2)
+  bidAmount        Float?
+  bidHourlyRate    Float?
   connectsRequired Int?
   demoUrlIncluded  Boolean        @default(false)
   version          Int            @default(1)
@@ -554,8 +562,8 @@ model Proposal {
   approvedAt    DateTime?
   rejectedAt    DateTime?
   submittedAt   DateTime?
-  reviewNotes   String?   @db.Text
-  failureReason String?   @db.Text
+  reviewNotes   String?
+  failureReason String?
 
   /// Stable key that makes Upwork submission idempotent.
   idempotencyKey String @unique @default(cuid())
@@ -576,16 +584,16 @@ model Proposal {
 }
 
 model DemoProject {
-  id         String  @id @default(cuid())
-  userId     String
-  jobId      String
-  proposalId String? @unique
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String  @db.ObjectId
+  jobId      String  @db.ObjectId
+  proposalId String? @unique @db.ObjectId
 
   status        DemoStatus     @default(PENDING)
   complexity    DemoComplexity @default(SMALL)
   templateKey   String?
   title         String
-  summary       String?        @db.Text
+  summary       String?
   industry      String?
   plan          Json?
   coverage      Json?
@@ -604,8 +612,8 @@ model DemoProject {
   liveUrl         String?
 
   buildStatus  String?
-  buildLog     String? @db.Text
-  errorMessage String? @db.Text
+  buildLog     String?
+  errorMessage String?
 
   inputTokens  Int?
   outputTokens Int?
@@ -626,9 +634,9 @@ model DemoProject {
 }
 
 model Deployment {
-  id     String @id @default(cuid())
-  userId String
-  demoId String
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @db.ObjectId
+  demoId String @db.ObjectId
 
   provider     String           @default("vercel")
   deploymentId String?
@@ -637,7 +645,7 @@ model Deployment {
   inspectorUrl String?
   target       String           @default("production")
   readyAt      DateTime?
-  errorMessage String?          @db.Text
+  errorMessage String?
   logs         Json?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
@@ -650,8 +658,8 @@ model Deployment {
 }
 
 model DemoScreenshot {
-  id        String   @id @default(cuid())
-  demoId    String
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  demoId    String   @db.ObjectId
   label     String
   path      String
   routePath String
@@ -667,14 +675,14 @@ model DemoScreenshot {
 }
 
 model ProposalDocument {
-  id           String         @id @default(cuid())
-  proposalId   String         @unique
+  id           String         @id @default(auto()) @map("_id") @db.ObjectId
+  proposalId   String         @unique @db.ObjectId
   status       DocumentStatus @default(PENDING)
   title        String
   filePath     String?
   pageCount    Int?
   content      Json?
-  errorMessage String?        @db.Text
+  errorMessage String?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -686,10 +694,10 @@ model ProposalDocument {
 // ---------------------------------------------------------------------------
 
 model PortfolioProject {
-  id             String    @id @default(cuid())
-  userId         String
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String    @db.ObjectId
   title          String
-  description    String    @db.Text
+  description    String
   technologies   String[]  @default([])
   url            String?
   githubUrl      String?
@@ -711,8 +719,8 @@ model PortfolioProject {
 // ---------------------------------------------------------------------------
 
 model AutomationRun {
-  id     String @id @default(cuid())
-  userId String
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @db.ObjectId
 
   status  AutomationRunStatus @default(QUEUED)
   trigger AutomationTrigger   @default(MANUAL)
@@ -732,7 +740,7 @@ model AutomationRun {
   inputTokens        Int      @default(0)
   outputTokens       Int      @default(0)
   errorCount         Int      @default(0)
-  errorMessage       String?  @db.Text
+  errorMessage       String?
   searchProfileIds   String[] @default([])
 
   createdAt DateTime @default(now())
@@ -748,11 +756,11 @@ model AutomationRun {
 }
 
 model AutomationRunLog {
-  id        String      @id @default(cuid())
-  runId     String
+  id        String      @id @default(auto()) @map("_id") @db.ObjectId
+  runId     String      @db.ObjectId
   level     RunLogLevel @default(INFO)
   step      String
-  message   String      @db.Text
+  message   String
   data      Json?
   createdAt DateTime    @default(now())
 
@@ -762,9 +770,9 @@ model AutomationRunLog {
 }
 
 model AutomationRunJob {
-  id        String   @id @default(cuid())
-  runId     String
-  jobId     String
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  runId     String   @db.ObjectId
+  jobId     String   @db.ObjectId
   selected  Boolean  @default(false)
   rank      Int?
   createdAt DateTime @default(now())
@@ -777,9 +785,9 @@ model AutomationRunJob {
 }
 
 model AutomationRunProposal {
-  id         String   @id @default(cuid())
-  runId      String
-  proposalId String
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  runId      String   @db.ObjectId
+  proposalId String   @db.ObjectId
   createdAt  DateTime @default(now())
 
   run      AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -789,10 +797,10 @@ model AutomationRunProposal {
 }
 
 model Submission {
-  id         String @id @default(cuid())
-  userId     String
-  proposalId String
-  jobId      String
+  id         String @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String @db.ObjectId
+  proposalId String @db.ObjectId
+  jobId      String @db.ObjectId
 
   status           SubmissionStatus @default(PENDING)
   idempotencyKey   String           @unique
@@ -801,7 +809,11 @@ model Submission {
   connectsAfter    Int?
   upworkOfferId    String?
   upworkResponse   Json?
-  errorMessage     String?          @db.Text
+  /// Outcome flags, read back from the Upwork response. Stored as columns
+  /// rather than queried out of JSON so reporting works on any database.
+  interviewing     Boolean          @default(false)
+  hired            Boolean          @default(false)
+  errorMessage     String?
   approvedByUserId String?
   submittedAt      DateTime?
   createdAt        DateTime         @default(now())
@@ -816,17 +828,17 @@ model Submission {
 }
 
 model Notification {
-  id           String             @id @default(cuid())
-  userId       String
+  id           String             @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String             @db.ObjectId
   type         NotificationType
   status       NotificationStatus @default(PENDING)
   channel      String             @default("email")
   subject      String
-  body         String             @db.Text
+  body         String
   data         Json?
   sentAt       DateTime?
   readAt       DateTime?
-  errorMessage String?            @db.Text
+  errorMessage String?
   createdAt    DateTime           @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -837,13 +849,13 @@ model Notification {
 
 /// Token accounting for cost protection and the admin dashboard.
 model AiUsageRecord {
-  id           String   @id @default(cuid())
-  userId       String?
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String?  @db.ObjectId
   operation    String
   model        String
   inputTokens  Int      @default(0)
   outputTokens Int      @default(0)
-  costUsd      Decimal  @default(0) @db.Decimal(12, 6)
+  costUsd      Float    @default(0)
   durationMs   Int?
   success      Boolean  @default(true)
   jobId        String?
@@ -859,8 +871,8 @@ model AiUsageRecord {
 
 /// Security / integration audit trail. Never stores secret values.
 model AuditLog {
-  id         String   @id @default(cuid())
-  userId     String?
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String?  @db.ObjectId
   action     String
   resource   String?
   resourceId String?

@@ -15,8 +15,6 @@
     "worker": "node --env-file-if-exists=.env --conditions=react-server --import tsx src/workers/main.ts",
     "worker:dev": "node --env-file-if-exists=.env --conditions=react-server --import tsx --watch src/workers/main.ts",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "node --env-file-if-exists=.env --import tsx prisma/seed.ts",
     "db:studio": "prisma studio"
@@ -52,6 +50,7 @@
     "ioredis": "^5.9.0",
     "jose": "^6.2.12",
     "lucide-react": "^1.42.0",
+    "mongodb": "^7.6.0",
     "next": "16.3.4",
     "next-auth": "5.0.0-beta.32",
     "nodemailer": "^8.0.11",

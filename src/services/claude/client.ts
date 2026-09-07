@@ -107,7 +107,7 @@ async function recordUsage(params: {
         model: params.model,
         inputTokens: params.usage.inputTokens,
         outputTokens: params.usage.outputTokens,
-        costUsd: estimateCostUsd(params.model, params.usage).toFixed(6),
+        costUsd: Number(estimateCostUsd(params.model, params.usage).toFixed(6)),
         durationMs: params.durationMs,
         success: params.success,
         jobId: params.jobId,

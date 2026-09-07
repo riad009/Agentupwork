@@ -202,6 +202,8 @@ export async function submitProposal(
           status: "SUCCESS",
           upworkOfferId: result.offerId,
           upworkResponse: (result.raw ?? {}) as never,
+          interviewing: readOutcomeFlag(result.raw, "interviewing"),
+          hired: readOutcomeFlag(result.raw, "hired"),
           connectsSpent,
           connectsAfter,
           submittedAt: new Date(),
@@ -306,6 +308,13 @@ export async function submitProposal(
 export async function assertProposalOwnership(userId: string, proposalId: string): Promise<void> {
   const found = await prisma.proposal.findFirst({ where: { id: proposalId, userId }, select: { id: true } });
   if (!found) throw new NotFoundError("Proposal not found.");
+}
+
+/** Reads a boolean outcome flag out of the Upwork response, if it reports one. */
+function readOutcomeFlag(raw: unknown, key: "interviewing" | "hired"): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const value = (raw as Record<string, unknown>)[key];
+  return value === true;
 }
 
 export class SubmissionBlockedError extends AppError {

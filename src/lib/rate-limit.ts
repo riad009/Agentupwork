@@ -1,4 +1,4 @@
-import { getRedis } from "@/lib/redis";
+import { getUtilityRedis } from "@/lib/redis";
 import { logger } from "@/lib/logger";
 
 export interface RateLimitResult {
@@ -44,8 +44,10 @@ export async function rateLimit(
   const window = Math.floor(Date.now() / (windowSeconds * 1000));
   const key = `ratelimit:${namespace}:${identifier}:${window}`;
 
+  const redis = getUtilityRedis();
+  if (!redis) return memoryLimit(key, limit, windowSeconds);
+
   try {
-    const redis = getRedis();
     const count = await redis.incr(key);
     if (count === 1) await redis.expire(key, windowSeconds);
 

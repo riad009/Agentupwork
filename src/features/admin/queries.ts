@@ -66,7 +66,7 @@ export async function getAdminOverview(): Promise<AdminOverview> {
 
   let database = true;
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await prisma.$runCommandRaw({ ping: 1 });
   } catch {
     database = false;
   }

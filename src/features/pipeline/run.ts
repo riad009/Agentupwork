@@ -279,8 +279,9 @@ export async function runAutomationPipeline(options: RunOptions): Promise<Pipeli
 
     if (fresh.length > 0) {
       await prisma.job.createMany({
+        // Already filtered against stored jobs above, and the
+        // (userId, upworkJobId) unique index is the backstop.
         data: fresh.map((entry) => toJobCreateData(entry.job, options.userId, entry.profileId)),
-        skipDuplicates: true,
       });
     }
 
@@ -292,7 +293,6 @@ export async function runAutomationPipeline(options: RunOptions): Promise<Pipeli
 
     await prisma.automationRunJob.createMany({
       data: storedJobs.map((job) => ({ runId: run.id, jobId: job.id })),
-      skipDuplicates: true,
     });
 
     await logStep(

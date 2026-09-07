@@ -1,215 +1,27 @@
 /**
  * Seed script.
  *
- * Creates an administrator account, a realistic AI profile, four job search
- * profiles and a small portfolio so the pipeline can be exercised immediately.
- * Safe to re-run: every write is an upsert keyed on stable identifiers.
+ * Applies the MongoDB indexes that back the schema's unique constraints, then
+ * creates an administrator with a realistic starting configuration.
+ * Safe to re-run.
  */
-import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcryptjs";
-
-const prisma = new PrismaClient();
-
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!";
-const ADMIN_NAME = process.env.SEED_ADMIN_NAME ?? "Riad Hossin";
-
-const SEARCH_PROFILES = [
-  {
-    name: "AI SaaS",
-    keywords: ["AI SaaS", "Claude", "OpenAI", "LLM", "RAG", "AI assistant", "Next.js"],
-    skills: ["Next.js", "TypeScript", "OpenAI", "Claude", "Vector Database"],
-    excludeKeywords: ["WordPress", "Wix", "data entry", "unpaid", "equity only"],
-    minFixedBudget: 2_000,
-    minHourlyRate: 45,
-    minClientHireRate: 60,
-    minClientSpend: 5_000,
-    resultLimit: 40,
-  },
-  {
-    name: "Stripe Development",
-    keywords: ["Stripe", "subscription billing", "checkout", "payments", "webhooks"],
-    skills: ["Stripe", "Node.js", "TypeScript", "PostgreSQL"],
-    excludeKeywords: ["crypto", "gambling", "casino"],
-    minFixedBudget: 1_500,
-    minHourlyRate: 45,
-    minClientHireRate: 55,
-    minClientSpend: 3_000,
-    resultLimit: 30,
-  },
-  {
-    name: "Next.js Full Stack",
-    keywords: ["Next.js", "React", "TypeScript", "Node.js", "Express", "Prisma", "PostgreSQL", "SaaS"],
-    skills: ["Next.js", "React", "TypeScript", "Prisma", "PostgreSQL"],
-    excludeKeywords: ["WordPress", "Shopify theme", "Squarespace"],
-    minFixedBudget: 2_500,
-    minHourlyRate: 50,
-    minClientHireRate: 60,
-    minClientSpend: 10_000,
-    resultLimit: 40,
-  },
-  {
-    name: "Twilio / ElevenLabs",
-    keywords: ["Twilio", "ElevenLabs", "voice AI", "IVR", "SMS", "call automation"],
-    skills: ["Twilio", "ElevenLabs", "Node.js", "TypeScript"],
-    excludeKeywords: ["cold calling", "robocall", "spam"],
-    minFixedBudget: 1_500,
-    minHourlyRate: 45,
-    minClientHireRate: 50,
-    minClientSpend: 2_000,
-    resultLimit: 25,
-  },
-];
-
-const PORTFOLIO = [
-  {
-    title: "Subscription billing for a B2B analytics platform",
-    description:
-      "Replaced a hand-rolled billing flow with Stripe Checkout and the customer portal: three plans, annual and monthly, proration on plan changes, and idempotent webhook handling that syncs entitlements into Postgres. Included a reconciliation job that catches any webhook the app missed.",
-    technologies: ["Next.js", "TypeScript", "Stripe", "Prisma", "PostgreSQL"],
-    clientIndustry: "B2B SaaS",
-    projectType: "Payments integration",
-    achievements: [
-      "Cut failed-payment churn by handling dunning through Stripe rather than custom email logic",
-      "Reduced billing support tickets by moving invoices and card updates into the customer portal",
-    ],
-    highlighted: true,
-  },
-  {
-    title: "Operations dashboard for a multi-clinic healthcare group",
-    description:
-      "Built the internal portal front desk staff use daily: appointment scheduling across clinicians, patient profiles, role-aware navigation for admin, clinician and reception, and a utilisation view. Focused on accessibility and fast keyboard workflows because staff use it continuously.",
-    technologies: ["Next.js", "React", "TypeScript", "PostgreSQL", "Tailwind CSS"],
-    clientIndustry: "Healthcare",
-    projectType: "Internal operations tool",
-    achievements: ["Replaced a spreadsheet workflow used across four clinic locations"],
-    highlighted: true,
-  },
-  {
-    title: "Retrieval-augmented assistant over an internal knowledge base",
-    description:
-      "Shipped a chat interface answering staff questions over roughly 4,000 internal documents, with inline citations back to the source. Spent most of the effort on retrieval quality and an evaluation harness rather than chat features, since answer accuracy was the actual requirement.",
-    technologies: ["Next.js", "TypeScript", "Claude", "Vector Database", "Node.js"],
-    clientIndustry: "Professional services",
-    projectType: "AI application",
-    achievements: ["Built an evaluation set so retrieval changes could be measured rather than guessed at"],
-    highlighted: false,
-  },
-];
+import { prisma } from "@/lib/prisma";
+import { ensureIndexes } from "@/features/setup/indexes";
+import { seedWorkspace } from "@/features/setup/seed";
 
 async function main(): Promise<void> {
-  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+  const indexes = await ensureIndexes();
+  console.log(`Indexes: ${indexes.created} created, ${indexes.alreadyPresent} already present.`);
 
-  const user = await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    create: {
-      email: ADMIN_EMAIL,
-      name: ADMIN_NAME,
-      passwordHash,
-      role: "ADMIN",
-      emailVerified: new Date(),
-    },
-    update: { name: ADMIN_NAME, role: "ADMIN" },
+  const result = await seedWorkspace({
+    email: process.env.SEED_ADMIN_EMAIL ?? "admin@example.com",
+    password: process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!",
+    name: process.env.SEED_ADMIN_NAME ?? "Admin",
   });
 
-  await prisma.userPreference.upsert({
-    where: { userId: user.id },
-    create: {
-      userId: user.id,
-      automationEnabled: false,
-      scheduleFrequency: "EVERY_6_HOURS",
-      maxJobsPerRun: 100,
-      topJobsCount: 10,
-      signatureName: ADMIN_NAME,
-      companyName: null,
-    },
-    update: {},
-  });
-
-  await prisma.aiProfile.upsert({
-    where: { userId: user.id },
-    create: {
-      userId: user.id,
-      professionalTitle: "Full Stack SaaS Developer",
-      yearsOfExperience: 7,
-      hourlyRate: 65,
-      minimumBudget: 1_500,
-      preferredProjectSize: "$3k–$20k, 4–12 weeks",
-      preferredTechnologies: [
-        "Next.js",
-        "React",
-        "TypeScript",
-        "Node.js",
-        "Express",
-        "Prisma",
-        "PostgreSQL",
-        "Stripe",
-        "Claude",
-        "OpenAI",
-        "Twilio",
-        "ElevenLabs",
-      ],
-      industries: ["AI SaaS", "FinTech", "Healthcare", "E-commerce"],
-      availability: "30 hours per week, able to start within a few days",
-      preferredTone: "direct, warm and technically specific",
-      proposalLength: "SHORT",
-      countriesToAvoid: [],
-      bio: "I build production SaaS products end to end: Next.js front ends, typed Node APIs, Postgres schemas, payments and AI features that hold up under real usage.",
-    },
-    update: {},
-  });
-
-  for (const profile of SEARCH_PROFILES) {
-    await prisma.jobSearchProfile.upsert({
-      where: { userId_name: { userId: user.id, name: profile.name } },
-      create: {
-        userId: user.id,
-        name: profile.name,
-        keywords: profile.keywords,
-        skills: profile.skills,
-        excludeKeywords: profile.excludeKeywords,
-        minFixedBudget: profile.minFixedBudget,
-        minHourlyRate: profile.minHourlyRate,
-        minClientHireRate: profile.minClientHireRate,
-        minClientSpend: profile.minClientSpend,
-        maxJobAgeHours: 72,
-        paymentVerifiedOnly: true,
-        resultLimit: profile.resultLimit,
-        isActive: true,
-      },
-      update: {},
-    });
-  }
-
-  for (const project of PORTFOLIO) {
-    const existing = await prisma.portfolioProject.findFirst({
-      where: { userId: user.id, title: project.title },
-      select: { id: true },
-    });
-
-    if (existing) continue;
-
-    await prisma.portfolioProject.create({
-      data: {
-        userId: user.id,
-        title: project.title,
-        description: project.description,
-        technologies: project.technologies,
-        clientIndustry: project.clientIndustry,
-        projectType: project.projectType,
-        achievements: project.achievements,
-        highlighted: project.highlighted,
-      },
-    });
-  }
-
-  const profileCount = await prisma.jobSearchProfile.count({ where: { userId: user.id } });
-  const portfolioCount = await prisma.portfolioProject.count({ where: { userId: user.id } });
-
-  console.log(`Seeded ${ADMIN_EMAIL} with ${profileCount} search profiles and ${portfolioCount} portfolio projects.`);
-  if (ADMIN_PASSWORD === "ChangeMe123!") {
-    console.log("Default password is ChangeMe123! — change it after your first sign-in.");
-  }
+  console.log(
+    `Seeded ${result.email} (${result.role}) with ${result.searchProfiles} search profiles and ${result.portfolioProjects} portfolio projects.`,
+  );
 }
 
 main()

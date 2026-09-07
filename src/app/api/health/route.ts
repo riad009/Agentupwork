@@ -10,7 +10,7 @@ export async function GET() {
   const checks = { database: false, redis: false };
 
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await prisma.$runCommandRaw({ ping: 1 });
     checks.database = true;
   } catch {
     checks.database = false;
