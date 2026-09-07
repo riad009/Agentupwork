@@ -1,0 +1,879 @@
+// Upwork AI Job Hunter — data model
+// PostgreSQL + Prisma. Every domain row is scoped to a User so tenants stay isolated.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ScheduleFrequency {
+  MANUAL
+  HOURLY
+  EVERY_3_HOURS
+  EVERY_6_HOURS
+  DAILY
+}
+
+enum ProjectType {
+  FIXED
+  HOURLY
+  UNKNOWN
+}
+
+enum ExperienceLevel {
+  ENTRY
+  INTERMEDIATE
+  EXPERT
+  ANY
+}
+
+enum JobStatus {
+  NEW
+  ANALYZED
+  SHORTLISTED
+  PROPOSAL_READY
+  SUBMITTED
+  ARCHIVED
+  SKIPPED
+}
+
+enum RecommendedAction {
+  HIGH_PRIORITY
+  APPLY
+  WATCH
+  SKIP
+}
+
+enum ProposalStatus {
+  GENERATED
+  NEEDS_REVIEW
+  APPROVED
+  REJECTED
+  SAVED_FOR_LATER
+  SUBMITTED
+  FAILED
+}
+
+enum DemoComplexity {
+  NONE
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+enum DemoStatus {
+  NOT_REQUIRED
+  PENDING
+  PLANNING
+  GENERATING
+  VALIDATING
+  REPO_CREATED
+  DEPLOYING
+  READY
+  FAILED
+}
+
+enum DeploymentStatus {
+  QUEUED
+  BUILDING
+  READY
+  ERROR
+  CANCELED
+}
+
+enum DocumentStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+}
+
+enum AutomationRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum AutomationTrigger {
+  SCHEDULED
+  MANUAL
+  BACKFILL
+}
+
+enum RunLogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+enum SubmissionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum NotificationType {
+  PROPOSALS_READY
+  AUTOMATION_FAILED
+  DEMO_READY
+  SUBMISSION_RESULT
+  SYSTEM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum IntegrationProvider {
+  UPWORK
+  CLAUDE
+  GITHUB
+  VERCEL
+  EMAIL
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  passwordHash  String?
+  role          Role      @default(USER)
+  emailVerified DateTime?
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts            Account[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  upworkConnection    UpworkConnection?
+  preference          UserPreference?
+  aiProfile           AiProfile?
+  searchProfiles      JobSearchProfile[]
+  jobs                Job[]
+  analyses            JobAnalysis[]
+  proposals           Proposal[]
+  demos               DemoProject[]
+  deployments         Deployment[]
+  portfolio           PortfolioProject[]
+  notifications       Notification[]
+  automationRuns      AutomationRun[]
+  submissions         Submission[]
+  aiUsage             AiUsageRecord[]
+  integrations        IntegrationCredential[]
+  auditLogs           AuditLog[]
+
+  @@index([role])
+  @@index([createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Integrations
+// ---------------------------------------------------------------------------
+
+/// OAuth2 connection to the official Upwork API. Tokens are AES-256-GCM
+/// encrypted at rest and never leave the server.
+model UpworkConnection {
+  id                     String    @id @default(cuid())
+  userId                 String    @unique
+  upworkUserId           String?
+  upworkOrgId            String?
+  accessTokenCiphertext  String    @db.Text
+  refreshTokenCiphertext String?   @db.Text
+  scope                  String?
+  tokenType              String    @default("Bearer")
+  expiresAt              DateTime?
+  connectedAt            DateTime  @default(now())
+  lastSyncedAt           DateTime?
+  lastRefreshedAt        DateTime?
+  isActive               Boolean   @default(true)
+  profileTitle           String?
+  profileName            String?
+  profilePictureUrl      String?
+  countryCode            String?
+  connectsBalance        Int?
+  connectsUpdatedAt      DateTime?
+  rawProfile             Json?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([isActive])
+}
+
+/// Per-user credentials for replaceable providers (Claude, GitHub, Vercel, SMTP).
+/// `secretCiphertext` is encrypted; only the server ever decrypts it.
+model IntegrationCredential {
+  id               String              @id @default(cuid())
+  userId           String
+  provider         IntegrationProvider
+  label            String?
+  secretCiphertext String              @db.Text
+  metadata         Json?
+  lastVerifiedAt   DateTime?
+  isActive         Boolean             @default(true)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([provider])
+}
+
+// ---------------------------------------------------------------------------
+// Preferences
+// ---------------------------------------------------------------------------
+
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // automation
+  automationEnabled Boolean           @default(false)
+  scheduleFrequency ScheduleFrequency @default(MANUAL)
+  maxJobsPerRun     Int               @default(100)
+  topJobsCount      Int               @default(10)
+
+  // demo / cost protection thresholds
+  demoAutoThreshold     Int     @default(90)
+  demoSuggestThreshold  Int     @default(80)
+  proposalOnlyThreshold Int     @default(70)
+  demoValueScoreMinimum Int     @default(80)
+  maxDemosPerRun        Int     @default(3)
+  maxDemoPages          Int     @default(7)
+  maxDemoIterations     Int     @default(3)
+  maxBuildFixAttempts   Int     @default(3)
+  maxScreenshots        Int     @default(6)
+  generatePdf           Boolean @default(true)
+  demoGenerationEnabled Boolean @default(true)
+
+  // ranking weights (0-100, normalised at scoring time)
+  weightSkillMatch    Int @default(25)
+  weightClientQuality Int @default(15)
+  weightBudget        Int @default(15)
+  weightCompetition   Int @default(15)
+  weightWinProb       Int @default(20)
+  weightRecency       Int @default(10)
+
+  // notifications
+  emailNotifications      Boolean @default(true)
+  notifyOnProposalsReady  Boolean @default(true)
+  notifyOnAutomationError Boolean @default(true)
+  notifyOnSubmission      Boolean @default(true)
+  digestOnly              Boolean @default(false)
+
+  // proposal preferences
+  proposalTone     String  @default("direct, warm, technically specific")
+  proposalMaxWords Int     @default(220)
+  includeQuestions Boolean @default(true)
+  signatureName    String?
+  portfolioUrl     String?
+  companyName      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Freelancer context injected into every Claude prompt.
+model AiProfile {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  professionalTitle     String?
+  yearsOfExperience     Int?
+  hourlyRate            Decimal? @db.Decimal(10, 2)
+  minimumBudget         Decimal? @db.Decimal(12, 2)
+  preferredProjectSize  String?
+  preferredTechnologies String[] @default([])
+  industries            String[] @default([])
+  availability          String?
+  preferredTone         String?
+  proposalLength        String   @default("SHORT")
+  countriesToAvoid      String[] @default([])
+  bio                   String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model JobSearchProfile {
+  id       String  @id @default(cuid())
+  userId   String
+  name     String
+  isActive Boolean @default(true)
+
+  keywords        String[] @default([])
+  includeKeywords String[] @default([])
+  excludeKeywords String[] @default([])
+  skills          String[] @default([])
+  categoryIds     String[] @default([])
+
+  minFixedBudget      Decimal?          @db.Decimal(12, 2)
+  minHourlyRate       Decimal?          @db.Decimal(10, 2)
+  maxHourlyRate       Decimal?          @db.Decimal(10, 2)
+  maxJobAgeHours      Int?              @default(72)
+  minClientHireRate   Int?
+  minClientSpend      Decimal?          @db.Decimal(14, 2)
+  paymentVerifiedOnly Boolean           @default(true)
+  minClientRating     Decimal?          @db.Decimal(3, 2)
+  maxProposals        Int?
+  countries           String[]          @default([])
+  excludedCountries   String[]          @default([])
+  experienceLevels    ExperienceLevel[] @default([])
+  projectType         ProjectType       @default(UNKNOWN)
+  durations           String[]          @default([])
+  resultLimit         Int               @default(50)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs Job[]
+
+  @@unique([userId, name])
+  @@index([userId, isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Jobs
+// ---------------------------------------------------------------------------
+
+model Job {
+  id              String  @id @default(cuid())
+  userId          String
+  searchProfileId String?
+
+  upworkJobId String
+  title       String
+  description String   @db.Text
+  url         String
+  category    String?
+  subcategory String?
+  skills      String[] @default([])
+
+  projectType       ProjectType     @default(UNKNOWN)
+  experienceLevel   ExperienceLevel @default(ANY)
+  budgetAmount      Decimal?        @db.Decimal(12, 2)
+  hourlyMin         Decimal?        @db.Decimal(10, 2)
+  hourlyMax         Decimal?        @db.Decimal(10, 2)
+  currency          String          @default("USD")
+  estimatedDuration String?
+  workload          String?
+  connectsRequired  Int?
+
+  clientCountry         String?
+  clientCity            String?
+  clientRating          Decimal?  @db.Decimal(3, 2)
+  clientHireRate        Int?
+  clientTotalSpent      Decimal?  @db.Decimal(14, 2)
+  clientJobsPosted      Int?
+  clientTotalHires      Int?
+  clientOpenJobs        Int?
+  clientPaymentVerified Boolean   @default(false)
+  clientMemberSince     DateTime?
+
+  proposalsCount    Int?
+  proposalsRange    String?
+  interviewCount    Int?
+  invitesSent       Int?
+  unansweredInvites Int?
+
+  postedAt  DateTime
+  fetchedAt DateTime  @default(now())
+  status    JobStatus @default(NEW)
+  raw       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  searchProfile JobSearchProfile?  @relation(fields: [searchProfileId], references: [id], onDelete: SetNull)
+  analysis      JobAnalysis?
+  proposals     Proposal[]
+  demos         DemoProject[]
+  submissions   Submission[]
+  runJobs       AutomationRunJob[]
+
+  @@unique([userId, upworkJobId])
+  @@index([userId, status])
+  @@index([userId, postedAt])
+  @@index([userId, fetchedAt])
+  @@index([searchProfileId])
+  @@index([upworkJobId])
+}
+
+model JobAnalysis {
+  id     String @id @default(cuid())
+  jobId  String @unique
+  userId String
+
+  overallScore       Int
+  skillMatch         Int
+  clientQuality      Int
+  competitionScore   Int
+  budgetScore        Int
+  winningProbability Int
+  riskScore          Int
+  rankedScore        Float @default(0)
+
+  recommendedAction    RecommendedAction
+  reasoningSummary     String            @db.Text
+  strengths            String[]          @default([])
+  risks                String[]          @default([])
+  technicalOpportunity String?           @db.Text
+
+  demoRecommended  Boolean        @default(false)
+  demoReason       String?        @db.Text
+  demoComplexity   DemoComplexity @default(NONE)
+  estimatedFiles   Int?
+  demoRequirements String[]       @default([])
+  demoValueScore   Int            @default(0)
+
+  requirementsExtract Json?
+  model               String?
+  inputTokens         Int?
+  outputTokens        Int?
+  analysisVersion     String   @default("1")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, overallScore])
+  @@index([userId, recommendedAction])
+  @@index([userId, rankedScore])
+}
+
+// ---------------------------------------------------------------------------
+// Proposals / demos / deployments
+// ---------------------------------------------------------------------------
+
+model Proposal {
+  id     String @id @default(cuid())
+  userId String
+  jobId  String
+
+  status           ProposalStatus @default(GENERATED)
+  content          String         @db.Text
+  editedContent    String?        @db.Text
+  questions        String[]       @default([])
+  bidAmount        Decimal?       @db.Decimal(12, 2)
+  bidHourlyRate    Decimal?       @db.Decimal(10, 2)
+  connectsRequired Int?
+  demoUrlIncluded  Boolean        @default(false)
+  version          Int            @default(1)
+
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+  submittedAt   DateTime?
+  reviewNotes   String?   @db.Text
+  failureReason String?   @db.Text
+
+  /// Stable key that makes Upwork submission idempotent.
+  idempotencyKey String @unique @default(cuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job          Job                     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  demo         DemoProject?
+  document     ProposalDocument?
+  submissions  Submission[]
+  runProposals AutomationRunProposal[]
+
+  @@index([userId, status])
+  @@index([jobId])
+  @@index([userId, createdAt])
+}
+
+model DemoProject {
+  id         String  @id @default(cuid())
+  userId     String
+  jobId      String
+  proposalId String? @unique
+
+  status        DemoStatus     @default(PENDING)
+  complexity    DemoComplexity @default(SMALL)
+  templateKey   String?
+  title         String
+  summary       String?        @db.Text
+  industry      String?
+  plan          Json?
+  coverage      Json?
+  requirements  Json?
+  demoEmail     String?
+  demoPassword  String?
+  pageCount     Int            @default(0)
+  fileCount     Int            @default(0)
+  iterations    Int            @default(0)
+  buildAttempts Int            @default(0)
+
+  githubRepoUrl   String?
+  githubRepoName  String?
+  githubOwner     String?
+  vercelProjectId String?
+  liveUrl         String?
+
+  buildStatus  String?
+  buildLog     String? @db.Text
+  errorMessage String? @db.Text
+
+  inputTokens  Int?
+  outputTokens Int?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job         Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  proposal    Proposal?        @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  deployments Deployment[]
+  screenshots DemoScreenshot[]
+
+  @@index([userId, status])
+  @@index([jobId])
+}
+
+model Deployment {
+  id     String @id @default(cuid())
+  userId String
+  demoId String
+
+  provider     String           @default("vercel")
+  deploymentId String?
+  status       DeploymentStatus @default(QUEUED)
+  url          String?
+  inspectorUrl String?
+  target       String           @default("production")
+  readyAt      DateTime?
+  errorMessage String?          @db.Text
+  logs         Json?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  demo DemoProject @relation(fields: [demoId], references: [id], onDelete: Cascade)
+
+  @@index([demoId])
+  @@index([userId, status])
+}
+
+model DemoScreenshot {
+  id        String   @id @default(cuid())
+  demoId    String
+  label     String
+  path      String
+  routePath String
+  width     Int
+  height    Int
+  viewport  String   @default("desktop")
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  demo DemoProject @relation(fields: [demoId], references: [id], onDelete: Cascade)
+
+  @@index([demoId, order])
+}
+
+model ProposalDocument {
+  id           String         @id @default(cuid())
+  proposalId   String         @unique
+  status       DocumentStatus @default(PENDING)
+  title        String
+  filePath     String?
+  pageCount    Int?
+  content      Json?
+  errorMessage String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio
+// ---------------------------------------------------------------------------
+
+model PortfolioProject {
+  id             String    @id @default(cuid())
+  userId         String
+  title          String
+  description    String    @db.Text
+  technologies   String[]  @default([])
+  url            String?
+  githubUrl      String?
+  clientIndustry String?
+  projectType    String?
+  achievements   String[]  @default([])
+  highlighted    Boolean   @default(false)
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, highlighted])
+}
+
+// ---------------------------------------------------------------------------
+// Automation & audit
+// ---------------------------------------------------------------------------
+
+model AutomationRun {
+  id     String @id @default(cuid())
+  userId String
+
+  status  AutomationRunStatus @default(QUEUED)
+  trigger AutomationTrigger   @default(MANUAL)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  jobsFetched        Int      @default(0)
+  jobsNew            Int      @default(0)
+  jobsAnalyzed       Int      @default(0)
+  topJobsSelected    Int      @default(0)
+  proposalsGenerated Int      @default(0)
+  demosAttempted     Int      @default(0)
+  demosGenerated     Int      @default(0)
+  documentsGenerated Int      @default(0)
+  estimatedConnects  Int      @default(0)
+  inputTokens        Int      @default(0)
+  outputTokens       Int      @default(0)
+  errorCount         Int      @default(0)
+  errorMessage       String?  @db.Text
+  searchProfileIds   String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs      AutomationRunLog[]
+  runJobs   AutomationRunJob[]
+  proposals AutomationRunProposal[]
+
+  @@index([userId, startedAt])
+  @@index([status])
+}
+
+model AutomationRunLog {
+  id        String      @id @default(cuid())
+  runId     String
+  level     RunLogLevel @default(INFO)
+  step      String
+  message   String      @db.Text
+  data      Json?
+  createdAt DateTime    @default(now())
+
+  run AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+}
+
+model AutomationRunJob {
+  id        String   @id @default(cuid())
+  runId     String
+  jobId     String
+  selected  Boolean  @default(false)
+  rank      Int?
+  createdAt DateTime @default(now())
+
+  run AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  job Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, jobId])
+  @@index([runId, selected])
+}
+
+model AutomationRunProposal {
+  id         String   @id @default(cuid())
+  runId      String
+  proposalId String
+  createdAt  DateTime @default(now())
+
+  run      AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  proposal Proposal      @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, proposalId])
+}
+
+model Submission {
+  id         String @id @default(cuid())
+  userId     String
+  proposalId String
+  jobId      String
+
+  status           SubmissionStatus @default(PENDING)
+  idempotencyKey   String           @unique
+  connectsSpent    Int?
+  connectsBefore   Int?
+  connectsAfter    Int?
+  upworkOfferId    String?
+  upworkResponse   Json?
+  errorMessage     String?          @db.Text
+  approvedByUserId String?
+  submittedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([proposalId])
+}
+
+model Notification {
+  id           String             @id @default(cuid())
+  userId       String
+  type         NotificationType
+  status       NotificationStatus @default(PENDING)
+  channel      String             @default("email")
+  subject      String
+  body         String             @db.Text
+  data         Json?
+  sentAt       DateTime?
+  readAt       DateTime?
+  errorMessage String?            @db.Text
+  createdAt    DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+/// Token accounting for cost protection and the admin dashboard.
+model AiUsageRecord {
+  id           String   @id @default(cuid())
+  userId       String?
+  operation    String
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costUsd      Decimal  @default(0) @db.Decimal(12, 6)
+  durationMs   Int?
+  success      Boolean  @default(true)
+  jobId        String?
+  runId        String?
+  createdAt    DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([operation])
+  @@index([createdAt])
+}
+
+/// Security / integration audit trail. Never stores secret values.
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  resource   String?
+  resourceId String?
+  success    Boolean  @default(true)
+  statusCode Int?
+  ip         String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([action])
+  @@index([createdAt])
+}
