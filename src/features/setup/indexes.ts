@@ -81,23 +81,23 @@ const INDEXES: IndexSpec[] = [
 
   // Query paths that the dashboard, job feed and run history rely on.
   { collection: "Job", name: "Job_userId_status_idx", key: { userId: 1, status: 1 } },
-  { collection: "Job", name: "Job_userId_postedAt_idx", key: { userId: 1, postedAt: -1 } },
-  { collection: "Job", name: "Job_userId_fetchedAt_idx", key: { userId: 1, fetchedAt: -1 } },
-  { collection: "JobAnalysis", name: "JobAnalysis_userId_rankedScore_idx", key: { userId: 1, rankedScore: -1 } },
+  { collection: "Job", name: "Job_userId_postedAt_idx", key: { userId: 1, postedAt: 1 } },
+  { collection: "Job", name: "Job_userId_fetchedAt_idx", key: { userId: 1, fetchedAt: 1 } },
+  { collection: "JobAnalysis", name: "JobAnalysis_userId_rankedScore_idx", key: { userId: 1, rankedScore: 1 } },
   {
     collection: "JobAnalysis",
     name: "JobAnalysis_userId_recommendedAction_idx",
     key: { userId: 1, recommendedAction: 1 },
   },
   { collection: "Proposal", name: "Proposal_userId_status_idx", key: { userId: 1, status: 1 } },
-  { collection: "Proposal", name: "Proposal_userId_createdAt_idx", key: { userId: 1, createdAt: -1 } },
+  { collection: "Proposal", name: "Proposal_userId_createdAt_idx", key: { userId: 1, createdAt: 1 } },
   { collection: "DemoProject", name: "DemoProject_userId_status_idx", key: { userId: 1, status: 1 } },
   { collection: "Submission", name: "Submission_userId_status_idx", key: { userId: 1, status: 1 } },
-  { collection: "AutomationRun", name: "AutomationRun_userId_startedAt_idx", key: { userId: 1, startedAt: -1 } },
+  { collection: "AutomationRun", name: "AutomationRun_userId_startedAt_idx", key: { userId: 1, startedAt: 1 } },
   { collection: "AutomationRunLog", name: "AutomationRunLog_runId_createdAt_idx", key: { runId: 1, createdAt: 1 } },
-  { collection: "AiUsageRecord", name: "AiUsageRecord_userId_createdAt_idx", key: { userId: 1, createdAt: -1 } },
+  { collection: "AiUsageRecord", name: "AiUsageRecord_userId_createdAt_idx", key: { userId: 1, createdAt: 1 } },
   { collection: "Notification", name: "Notification_userId_status_idx", key: { userId: 1, status: 1 } },
-  { collection: "AuditLog", name: "AuditLog_userId_createdAt_idx", key: { userId: 1, createdAt: -1 } },
+  { collection: "AuditLog", name: "AuditLog_userId_createdAt_idx", key: { userId: 1, createdAt: 1 } },
 ];
 
 export interface IndexResult {
@@ -117,24 +117,30 @@ export async function ensureIndexes(): Promise<IndexResult> {
   const result: IndexResult = { created: 0, alreadyPresent: 0, failed: [] };
 
   for (const [collection, specs] of grouped) {
-    try {
-      const response = (await prisma.$runCommandRaw({
-        createIndexes: collection,
-        indexes: specs.map((spec) => ({
-          key: spec.key,
-          name: spec.name,
-          ...(spec.unique ? { unique: true } : {}),
-        })),
-      })) as { numIndexesBefore?: number; numIndexesAfter?: number; note?: string };
+    for (const spec of specs) {
+      try {
+        const response = (await prisma.$runCommandRaw({
+          createIndexes: collection,
+          indexes: [{ key: spec.key, name: spec.name, ...(spec.unique ? { unique: true } : {}) }],
+        })) as { numIndexesBefore?: number; numIndexesAfter?: number };
 
-      const before = response.numIndexesBefore ?? 0;
-      const after = response.numIndexesAfter ?? before;
-      result.created += Math.max(0, after - before);
-      result.alreadyPresent += specs.length - Math.max(0, after - before);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.warn({ collection, reason }, "Index creation failed");
-      for (const spec of specs) result.failed.push({ name: spec.name, reason: reason.slice(0, 200) });
+        const before = response.numIndexesBefore ?? 0;
+        const after = response.numIndexesAfter ?? before;
+        if (after > before) result.created += 1;
+        else result.alreadyPresent += 1;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+
+        // An index of the same name already exists. `prisma db push` may have
+        // created it with an equivalent definition, which is not a failure.
+        if (/IndexKeySpecsConflict|already exists|IndexOptionsConflict/i.test(reason)) {
+          result.alreadyPresent += 1;
+          continue;
+        }
+
+        logger.warn({ collection, index: spec.name, reason }, "Index creation failed");
+        result.failed.push({ name: spec.name, reason: reason.slice(0, 200) });
+      }
     }
   }
 
